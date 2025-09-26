@@ -3,7 +3,7 @@ member_id INTEGER PRIMARY KEY,
 active VARCHAR(20) NOT NULL DEFAULT 'deactive',
 year INTEGER NOT NULL,
 gender VARCHAR(32),
-want_spam BOOLEAN NOT NULL DEFAULT FALSE
+spam VARCHAR(32) NOT NULL DEFAULT 'no spam'
 );
 
 CREATE TABLE room (
@@ -11,8 +11,6 @@ room_id INTEGER PRIMARY KEY,
 name VARCHAR(32),
 description VARCHAR(32)
 );
-
-
 
 CREATE TABLE date (
 date_id INTEGER PRIMARY KEY,
