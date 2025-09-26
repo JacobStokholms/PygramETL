@@ -39,9 +39,9 @@ CREATE TABLE product (
 product_id iNTEGER PRIMARY KEY,
 name VARCHAR(32),
 price NUMERIC(10,2),
-active BOOLEAN NOT NULL DEFAULT FALSE,
+active VARCHAR(32) NOT NULL DEFAULT 'deactive',
 deactivate_date INTEGER,
-alkohol_content_ml NUMERIC(10,2),
+alcohol_content_ml NUMERIC(10,2),
 version INTEGER  NOT NULL,
 newest_version BOOLEAN NOT NULL DEFAULT FALSE,
 FOREIGN KEY (deactivate_date ) REFERENCES  date (date_id)
