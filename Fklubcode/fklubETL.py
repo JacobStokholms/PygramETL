@@ -31,6 +31,8 @@ member_source = CSVSource(f=member_file_handle, delimiter=';')
 product_file_handle = open('product.csv', 'r', 16384, "utf-8")
 product_source = CSVSource(f=product_file_handle, delimiter=';')
 
+product_categories_file_handle = open('product_categories.csv', 'r', 16384, "utf-8")
+product_categories_source = CSVSource(f=product_categories_file_handle, delimiter=';')
 
 category_dimension = CachedDimension(
         name='category',
@@ -62,11 +64,16 @@ time_of_day_dimension = CachedDimension(
         key='time_of_day_id',
         attributes=['time_of_day','hours', 'minutes', 'seconds'])
 
+product_category_bridge = FactTable(
+        name='product_category',
+        keyrefs=['product_id', 'category_id'],
+        measures=['weight'])
 
 dw_conn_wrapper.execute("TRUNCATE TABLE category RESTART IDENTITY CASCADE;")
 dw_conn_wrapper.execute("TRUNCATE TABLE room RESTART IDENTITY CASCADE;")
 dw_conn_wrapper.execute("TRUNCATE TABLE member RESTART IDENTITY CASCADE;")
 dw_conn_wrapper.execute("TRUNCATE TABLE product RESTART IDENTITY CASCADE;")
+dw_conn_wrapper.execute("TRUNCATE TABLE product_category RESTART IDENTITY CASCADE;")
 dw_conn_wrapper.commit()
 
 def map_member(row):
@@ -99,7 +106,7 @@ def map_product(row):
     row.pop('quantity', None)
     row.pop('start_date', None)
 
-    #row["deactivate_date"] = 1 # need to create date dimension and time dimension.
+    #row["deactivate_date"] # splitted later into date dimension and time dimension.
 
     return row
 
@@ -108,10 +115,8 @@ def split_date(row):
 
     # Splitting of the date into parts
     raw = row['deactivate_date']
-    # 1) Handle null-ish values early
+    # 1) Default null if no date is exist
     if raw is None or (isinstance(raw, str) and raw.strip() == ""):
-        # Your table has NOT NULL columns, so either skip this row or set placeholders.
-        #row.update({"date": None, "year": None, "month": None, "day": None, "semester": None})
         row['deactivate_time_of_day'] = None
     else:
         # 2) Parse: accept datetime as-is, otherwise parse string
@@ -134,7 +139,7 @@ def split_time(row):
     """Splits the time part of deactivate_date into useful fields."""
     raw = row.get('deactivate_date')
 
-    # 1) Handle null-ish values
+    # 1) Default null if no date is exist
     if raw is None or (isinstance(raw, str) and raw.strip() == ""):
         row['deactivate_date'] = None
     else:
@@ -155,33 +160,31 @@ def split_time(row):
 
 
 member_source_mapped = TransformingSource(member_source, map_member)
-product_source_mapped = TransformingSource(product_source,map_product)
+[member_dimension.insert(row) for row in member_source_mapped]
+
 
 [category_dimension.insert(row) for row in category_source]
 [room_dimension.insert(row) for row in room_source]
-[member_dimension.insert(row) for row in member_source_mapped]
-#[product_dimension.insert(row) for row in product_source_mapped]
 
 for row in product_source:
 
-    # Each row is passed to the date split function for splitting
     map_product(row)
     split_date(row)
     split_time(row)
 
-    # Lookups are performed to find the key in each dimension for the fact
-    # and if the data is not there, it is inserted from the sales row
     if row['deactivate_date'] != None:
         row['deactivate_date'] = date_dimension.ensure(row)
         row['deactivate_time_of_day'] = time_of_day_dimension.ensure(row)
 
-    # The location dimension is pre-filled, so a missing row is an error
-    #row['locationid'] = location_dimension.lookup(row)
-    #if not row['locationid']:
-    #    raise ValueError("city was not present in the location dimension")
-
-    # The row can then be inserted into the fact table
     product_dimension.insert(row)
+dw_conn_wrapper.commit()
+
+#for row in product_categories_source:
+ #   row['product_id']  = product_dimension.ensure(row)   # resolves/creates product
+  #  row['category_id'] = category_dimension.ensure(row)  # resolves/creates category
+   # row['weight'] = row.get('weight', 1)
+
+   # product_category_bridge.insert(row)
 
 
 category_file_handle.close()
