@@ -17,7 +17,8 @@ date_id INTEGER PRIMARY KEY,
 date DATE NOT NULL,
 day INT NOT NULL,
 month VARCHAR(12) NOT NULL,
-year INTEGER NOT NULL
+year INTEGER NOT NULL,
+semester VARCHAR(12) NOT NULL
 );
 
 
@@ -25,9 +26,9 @@ year INTEGER NOT NULL
 CREATE TABLE time_of_day (
 time_of_day_id INTEGER PRIMARY KEY,
 time_of_day TIME NOT NULL,
-seconds INTEGER NOT NULL,
+hours INTEGER NOT NULL,
 minutes INTEGER NOT NULL,
-hours INTEGER NOT NULL
+seconds INTEGER NOT NULL
 );
 
 CREATE TABLE category (
@@ -41,10 +42,10 @@ name VARCHAR(32),
 price NUMERIC(10,2),
 active VARCHAR(32) NOT NULL DEFAULT 'deactive',
 deactivate_date INTEGER,
+deactivate_time_of_day INTEGER,
 alcohol_content_ml NUMERIC(10,2),
-version INTEGER  NOT NULL,
-newest_version BOOLEAN NOT NULL DEFAULT FALSE,
-FOREIGN KEY (deactivate_date ) REFERENCES  date (date_id)
+FOREIGN KEY (deactivate_date ) REFERENCES  date (date_id),
+FOREIGN KEY (deactivate_time_of_day ) REFERENCES  time_of_day (time_of_day_id)
 );
 
 CREATE TABLE product_category (
