@@ -60,11 +60,14 @@ FOREIGN KEY ( category_id) REFERENCES category ( category_id)
 CREATE TABLE sale (
 member_id INTEGER NOT NULL,
 product_id INTEGER NOT NULL,
-date_id INTEGER NOT NULL,
+date INTEGER NOT NULL,
+time_of_day INTEGER NOT NULL,
 room_id INTEGER NOT NULL,
-PRIMARY KEY(member_id, product_id, date_id, room_id),
+price INTEGER NOT NULL DEFAULT 0,
+PRIMARY KEY(member_id, product_id, date,time_of_day, room_id),
 FOREIGN KEY (member_id) REFERENCES member (member_id),
 FOREIGN KEY (product_id) REFERENCES product (product_id),
-FOREIGN KEY (date_id) REFERENCES date (date_id),
+FOREIGN KEY (date) REFERENCES date (date_id),
+FOREIGN KEY (time_of_day) REFERENCES  time_of_day (time_of_day_id),
 FOREIGN KEY (room_id) REFERENCES room (room_id)
 );

@@ -15,7 +15,7 @@ import calendar
 
 # Opening of connections and creation of a ConnectionWrapper.
 
-dw_string = "host='localhost' dbname='fklub' user='dbs' password='dbs'"
+dw_string = "host='localhost' dbname='fklub' port='5433' user='postgres' password='admin'"
 dw_conn = psycopg2.connect(dw_string)
 dw_conn_wrapper = pygrametl.ConnectionWrapper(connection=dw_conn)
 
@@ -34,25 +34,32 @@ product_source = CSVSource(f=product_file_handle, delimiter=';')
 product_categories_file_handle = open('product_categories.csv', 'r', 16384, "utf-8")
 product_categories_source = CSVSource(f=product_categories_file_handle, delimiter=';')
 
+sale_file_handle = open('sale.csv', 'r', 16384, "utf-8")
+sale_source = CSVSource(f=sale_file_handle, delimiter=';')
+
 category_dimension = CachedDimension(
         name='category',
         key='category_id',
-        attributes=['name'])
+        attributes=['name'],
+        lookupatts=['category_id'])
 
 room_dimension = CachedDimension(
         name='room',
         key='room_id',
-        attributes=['name','description'])
+        attributes=['name','description'],
+        lookupatts=['room_id'])
 
 member_dimension = CachedDimension(
         name='member',
         key='member_id',
-        attributes=['active','year','gender','spam'])
+        attributes=['active','year','gender','spam'],
+        lookupatts=['member_id'])
 
 product_dimension = CachedDimension(
         name='product',
         key='product_id',
-        attributes=['name','price','active','deactivate_date','deactivate_time_of_day','alcohol_content_ml'])
+        attributes=['name','price','active','deactivate_date','deactivate_time_of_day','alcohol_content_ml'],
+        lookupatts=['product_id'])
 
 date_dimension = CachedDimension(
         name='date',
@@ -69,11 +76,17 @@ product_category_bridge = FactTable(
         keyrefs=['product_id', 'category_id'],
         measures=['weight'])
 
+fact_table = FactTable(
+        name='fact_api',
+        keyrefs=['member_id', 'product_id','date','time_of_day','room_id'],
+        measures=['price'])
+
 dw_conn_wrapper.execute("TRUNCATE TABLE category RESTART IDENTITY CASCADE;")
 dw_conn_wrapper.execute("TRUNCATE TABLE room RESTART IDENTITY CASCADE;")
 dw_conn_wrapper.execute("TRUNCATE TABLE member RESTART IDENTITY CASCADE;")
 dw_conn_wrapper.execute("TRUNCATE TABLE product RESTART IDENTITY CASCADE;")
 dw_conn_wrapper.execute("TRUNCATE TABLE product_category RESTART IDENTITY CASCADE;")
+dw_conn_wrapper.execute("TRUNCATE TABLE sale RESTART IDENTITY CASCADE;")
 dw_conn_wrapper.commit()
 
 def map_member(row):
@@ -106,11 +119,13 @@ def map_product(row):
     row.pop('quantity', None)
     row.pop('start_date', None)
 
+    row['name'] = row.get('name', 'Unknown Product')
+
     #row["deactivate_date"] # splitted later into date dimension and time dimension.
 
     return row
 
-def split_date(row):
+def split_date_product(row):
     """Splits a date represented by a datetime into its three parts"""
 
     # Splitting of the date into parts
@@ -135,13 +150,63 @@ def split_date(row):
         row["semester"] = 'Efterår' if (date.month >= 9 or date.month == 1) else 'Forår'
 
 
-def split_time(row):
+def split_time_product(row):
     """Splits the time part of deactivate_date into useful fields."""
     raw = row.get('deactivate_date')
 
     # 1) Default null if no date is exist
     if raw is None or (isinstance(raw, str) and raw.strip() == ""):
         row['deactivate_date'] = None
+    else:
+        # 2) Parse to datetime (accept datetime as-is)
+        if isinstance(raw, datetime):
+            dt = raw
+        else:
+            try:
+                dt = parser.isoparse(str(raw))    # strict-ish ISO
+            except Exception:
+                dt = parser.parse(str(raw))       # fuzzy fallback
+
+        # 3) Extract time fields
+        row['time_of_day']   = dt.strftime('%H:%M:%S')  # VARCHAR
+        row['hours']   = dt.hour
+        row['minutes'] = dt.minute
+        row['seconds'] = dt.second
+
+
+
+def split_date_sale(row):
+    """Splits a date represented by a datetime into its three parts"""
+
+    # Splitting of the date into parts
+    raw = row['timestamp']
+    # 1) Default null if no date is exist
+    if raw is None or (isinstance(raw, str) and raw.strip() == ""):
+        row['timestamp'] = None
+    else:
+        # 2) Parse: accept datetime as-is, otherwise parse string
+        if isinstance(raw, datetime):
+            date = raw
+        else:
+            try:
+                date = parser.isoparse(str(raw))  # strict-ish ISO (handles '+02')
+            except Exception:
+                # Optional fallback: try fuzzy parse for non-ISO inputs
+                date = parser.parse(str(raw))
+        row['date'] = date.isoformat()
+        row['year'] = date.year
+        row['month'] = date.strftime('%B')
+        row['day'] = date.day
+        row["semester"] = 'Efterår' if (date.month >= 9 or date.month == 1) else 'Forår'
+
+
+def split_time_sale(row):
+    """Splits the time part of deactivate_date into useful fields."""
+    raw = row.get('timestamp')
+
+    # 1) Default null if no date is exist
+    if raw is None or (isinstance(raw, str) and raw.strip() == ""):
+        row['timestamp'] = None
     else:
         # 2) Parse to datetime (accept datetime as-is)
         if isinstance(raw, datetime):
@@ -169,8 +234,8 @@ member_source_mapped = TransformingSource(member_source, map_member)
 for row in product_source:
 
     map_product(row)
-    split_date(row)
-    split_time(row)
+    split_date_product(row)
+    split_time_product(row)
 
     if row['deactivate_date'] != None:
         row['deactivate_date'] = date_dimension.ensure(row)
@@ -186,11 +251,67 @@ dw_conn_wrapper.commit()
 
    # product_category_bridge.insert(row)
 
+for row in product_categories_source:
+    pid = row['product_id']
+    cid = row['category_id']
+
+    # Ensure product exists in product_dimension
+    product_row = {
+        'product_id': pid,
+        'name': row.get('name', 'Unknown'),
+        'price': row.get('price', None),
+        'active': row.get('active', 'deactive'),
+        'deactivate_date': row.get('deactivate_date', None),
+        'deactivate_time_of_day': row.get('deactivate_time_of_day', None),
+        'alcohol_content_ml': row.get('alcohol_content_ml', None)
+    }
+    row['product_id'] = product_dimension.ensure(product_row)
+
+    # Ensure category exists in category_dimension
+    category_row = {
+        'category_id': cid,
+        'name': row.get('category_id')
+    }
+    row['category_id'] = category_dimension.ensure(category_row)
+
+    # Set weight, default to 1
+    weight = row.get('weight', 1)
+
+    # Insert into the bridge table safely using ON CONFLICT
+    dw_conn_wrapper.execute("""
+        INSERT INTO product_category (product_id, category_id, weight)
+        VALUES (%s, %s, %s)
+        ON CONFLICT (product_id, category_id) DO NOTHING
+    """, (row['product_id'], row['category_id'], weight))
+
+for row in sale_source:
+    split_date_sale(row)
+    split_time_sale(row)
+
+    row['product_id'] = product_dimension.lookup(row)
+    row['member_id'] = member_dimension.lookup(row)
+    row['room_id'] = room_dimension.lookup(row)
+
+    if row['timestamp'] != None:
+        row['date'] = date_dimension.ensure(row)
+        row['time_of_day'] = time_of_day_dimension.ensure(row)
+
+    if row['price'] == None:
+        row['price'] = 0
+
+    if (row['timestamp'] != None and row['member_id'] != None and row['product_id'] != None and row['room_id'] != None) :
+        dw_conn_wrapper.execute("""
+               INSERT INTO sale (member_id,product_id, date,time_of_day,room_id, price)
+               VALUES (%s, %s, %s, %s, %s, %s)
+               ON CONFLICT (member_id,product_id, date,time_of_day,room_id) DO NOTHING
+           """, (row['member_id'],row['product_id'],row['date'],row['time_of_day'], row['room_id'], row['price']))
 
 category_file_handle.close()
 room_file_handle.close()
 member_file_handle.close()
 product_file_handle.close()
+product_categories_file_handle.close()
+sale_file_handle.close()
 
 # The data warehouse connection is then ordered to commit and close
 dw_conn_wrapper.commit()
