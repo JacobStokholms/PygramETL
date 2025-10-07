@@ -1,5 +1,6 @@
 CREATE TABLE member (
 member_id INTEGER PRIMARY KEY,
+src_member_id INTEGER NOT NULL,
 active VARCHAR(20) NOT NULL DEFAULT 'deactive',
 year INTEGER NOT NULL,
 gender VARCHAR(32),
@@ -8,6 +9,7 @@ spam VARCHAR(32) NOT NULL DEFAULT 'no spam'
 
 CREATE TABLE room (
 room_id INTEGER PRIMARY KEY,
+src_room_id INTEGER NOT NULL,
 name VARCHAR(32),
 description VARCHAR(32)
 );
@@ -33,11 +35,13 @@ seconds INTEGER NOT NULL
 
 CREATE TABLE category (
 category_id INTEGER PRIMARY KEY,
+src_category_id INTEGER NOT NULL,
 name VARCHAR(32)
 );
 
 CREATE TABLE product (
 product_id iNTEGER PRIMARY KEY,
+src_product_id INTEGER NOT NULL,
 name VARCHAR(32),
 price NUMERIC(10,2),
 active VARCHAR(32) NOT NULL DEFAULT 'deactive',

@@ -23,7 +23,7 @@
         </library>
       </libraries>
     </data-source>
-    <data-source source="LOCAL" name="fklub adminner" uuid="a65a1df3-7bcf-4c73-87ad-f7fed4732994">
+    <data-source source="LOCAL" name="fklub PGAdmin" uuid="a65a1df3-7bcf-4c73-87ad-f7fed4732994">
       <driver-ref>postgresql</driver-ref>
       <synchronize>true</synchronize>
       <jdbc-driver>org.postgresql.Driver</jdbc-driver>

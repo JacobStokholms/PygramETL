@@ -45,6 +45,13 @@
             </Attribute>
           </value>
         </entry>
+        <entry key="\Fklubcode\room.csv">
+          <value>
+            <Attribute>
+              <option name="separator" value=";" />
+            </Attribute>
+          </value>
+        </entry>
         <entry key="\Fklubcode\sale.csv">
           <value>
             <Attribute>

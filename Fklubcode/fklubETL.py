@@ -1,6 +1,7 @@
 import sqlite3
 from datetime import datetime
 from decimal import Decimal, ROUND_HALF_UP
+from tqdm import tqdm  # pip install tqdm
 
 from dateutil import parser
 import psycopg2
@@ -40,26 +41,26 @@ sale_source = CSVSource(f=sale_file_handle, delimiter=';')
 category_dimension = CachedDimension(
         name='category',
         key='category_id',
-        attributes=['name'],
-        lookupatts=['category_id'])
+        attributes=['name','src_category_id'],
+        lookupatts=['src_category_id'])
 
 room_dimension = CachedDimension(
         name='room',
         key='room_id',
-        attributes=['name','description'],
-        lookupatts=['room_id'])
+        attributes=['name','description','src_room_id'],
+        lookupatts=['src_room_id'])
 
 member_dimension = CachedDimension(
         name='member',
         key='member_id',
-        attributes=['active','year','gender','spam'],
-        lookupatts=['member_id'])
+        attributes=['active','year','gender','spam','src_member_id'],
+        lookupatts=['src_member_id'])
 
 product_dimension = CachedDimension(
         name='product',
         key='product_id',
-        attributes=['name','price','active','deactivate_date','deactivate_time_of_day','alcohol_content_ml'],
-        lookupatts=['product_id'])
+        attributes=['name','price','active','deactivate_date','deactivate_time_of_day','alcohol_content_ml','src_product_id'],
+        lookupatts=['src_product_id'])
 
 date_dimension = CachedDimension(
         name='date',
@@ -82,10 +83,15 @@ fact_table = FactTable(
         measures=['price'])
 
 dw_conn_wrapper.execute("TRUNCATE TABLE category RESTART IDENTITY CASCADE;")
+dw_conn_wrapper.commit()
 dw_conn_wrapper.execute("TRUNCATE TABLE room RESTART IDENTITY CASCADE;")
+dw_conn_wrapper.commit()
 dw_conn_wrapper.execute("TRUNCATE TABLE member RESTART IDENTITY CASCADE;")
+dw_conn_wrapper.commit()
 dw_conn_wrapper.execute("TRUNCATE TABLE product RESTART IDENTITY CASCADE;")
+dw_conn_wrapper.commit()
 dw_conn_wrapper.execute("TRUNCATE TABLE product_category RESTART IDENTITY CASCADE;")
+dw_conn_wrapper.commit()
 dw_conn_wrapper.execute("TRUNCATE TABLE sale RESTART IDENTITY CASCADE;")
 dw_conn_wrapper.commit()
 
@@ -99,6 +105,7 @@ def map_member(row):
     g = str(row.get('gender', '')).strip().lower()
     row['gender'] = {'m': 'male', 'f': 'female'}.get(g, 'unknown')
 
+    row['src_member_id'] = row['id']
     # remove attributes you don't need downstream
     row.pop('undo_count', None)
     row.pop('balance', None)
@@ -115,6 +122,7 @@ def map_product(row):
     def is_t(val):
         return str(val).strip().lower() == 't'
 
+    row['src_product_id'] = row['id']
     row['active'] = 'active' if is_t(row['active']) else 'deactive'
     row.pop('quantity', None)
     row.pop('start_date', None)
@@ -227,9 +235,15 @@ def split_time_sale(row):
 member_source_mapped = TransformingSource(member_source, map_member)
 [member_dimension.insert(row) for row in member_source_mapped]
 
+def category_map(row):
+    row['src_category_id'] = row['id']
+category_source_mapped = TransformingSource(category_source,category_map)
+[category_dimension.insert(row) for row in category_source_mapped]
 
-[category_dimension.insert(row) for row in category_source]
-[room_dimension.insert(row) for row in room_source]
+def room_map(row):
+    row['src_room_id'] = row['id']
+room_source_mapped = TransformingSource(room_source,room_map)
+[room_dimension.insert(row) for row in room_source_mapped]
 
 for row in product_source:
 
@@ -252,27 +266,28 @@ dw_conn_wrapper.commit()
    # product_category_bridge.insert(row)
 
 for row in product_categories_source:
-    pid = row['product_id']
+    #pid = row['product_id']
     cid = row['category_id']
 
     # Ensure product exists in product_dimension
-    product_row = {
-        'product_id': pid,
-        'name': row.get('name', 'Unknown'),
-        'price': row.get('price', None),
-        'active': row.get('active', 'deactive'),
-        'deactivate_date': row.get('deactivate_date', None),
-        'deactivate_time_of_day': row.get('deactivate_time_of_day', None),
-        'alcohol_content_ml': row.get('alcohol_content_ml', None)
-    }
-    row['product_id'] = product_dimension.ensure(product_row)
-
+    # product_row = {
+    #     'product_id': pid,
+    #     'name': row.get('name', 'Unknown'),
+    #     'price': row.get('price', None),
+    #     'active': row.get('active', 'deactive'),
+    #     'deactivate_date': row.get('deactivate_date', None),
+    #     'deactivate_time_of_day': row.get('deactivate_time_of_day', None),
+    #     'alcohol_content_ml': row.get('alcohol_content_ml', None)
+    # }
+    pid = row['product_id']
+    row['product_id'] = product_dimension.ensure({'src_product_id': pid})
     # Ensure category exists in category_dimension
-    category_row = {
-        'category_id': cid,
-        'name': row.get('category_id')
-    }
-    row['category_id'] = category_dimension.ensure(category_row)
+    # category_row = {
+    #     'category_id': cid,
+    #     'name': row.get('category_id')
+    # }
+
+    row['category_id'] = category_dimension.ensure({'src_category_id': cid})
 
     # Set weight, default to 1
     weight = row.get('weight', 1)
@@ -284,13 +299,20 @@ for row in product_categories_source:
         ON CONFLICT (product_id, category_id) DO NOTHING
     """, (row['product_id'], row['category_id'], weight))
 
-for row in sale_source:
+dw_conn_wrapper.commit()
+
+for row in tqdm(sale_source, desc="Processing sales"):
     split_date_sale(row)
     split_time_sale(row)
 
-    row['product_id'] = product_dimension.lookup(row)
-    row['member_id'] = member_dimension.lookup(row)
-    row['room_id'] = room_dimension.lookup(row)
+    pid = row['product_id']
+    row['product_id'] = product_dimension.lookup({'src_product_id': pid})
+
+    mid = row['member_id']
+    row['member_id'] = member_dimension.lookup({'src_member_id': mid})
+
+    rid = row['room_id']
+    row['room_id'] = room_dimension.lookup({'src_room_id': rid})
 
     if row['timestamp'] != None:
         row['date'] = date_dimension.ensure(row)
@@ -300,6 +322,7 @@ for row in sale_source:
         row['price'] = 0
 
     if (row['timestamp'] != None and row['member_id'] != None and row['product_id'] != None and row['room_id'] != None) :
+
         dw_conn_wrapper.execute("""
                INSERT INTO sale (member_id,product_id, date,time_of_day,room_id, price)
                VALUES (%s, %s, %s, %s, %s, %s)
