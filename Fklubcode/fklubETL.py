@@ -318,8 +318,12 @@ for row in tqdm(sale_source, desc="Processing sales"):
         row['date'] = date_dimension.ensure(row)
         row['time_of_day'] = time_of_day_dimension.ensure(row)
 
-    if row['price'] == None:
-        row['price'] = 0
+    v = str(row.get('price', '')).strip()
+    if v == '':
+        row['price'] = None
+    else:
+        amt = Decimal(v) / Decimal(100)
+        row['price'] = amt.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)  # 2 decimals
 
     if (row['timestamp'] != None and row['member_id'] != None and row['product_id'] != None and row['room_id'] != None) :
 
